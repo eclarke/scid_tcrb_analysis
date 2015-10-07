@@ -1,0 +1,611 @@
+---
+title: "SCID-X1 TCR Repertoire Analysis"
+author: "Erik Clarke"
+date: "10 April, 2015"
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 7
+    toc: yes
+---
+```{r init, echo=TRUE, message=FALSE, warning=FALSE}
+## This report uses Packrat to manage package dependencies.
+
+## Set options for Knitr
+knitr::opts_chunk$set(
+  echo=FALSE,
+  warning=FALSE,
+  message=FALSE,
+  cache=FALSE
+  )
+
+## Load libraries (ideally, from local packrat lib folder)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(xtable)
+library(RMySQL)
+library(stringr)
+library(data.table)
+library(pander)
+library(ggthemes)
+library(gridExtra)
+library(ggbeeswarm)
+library(magrittr)
+library(ineq)
+
+## Custom theme settings
+# No axis labels, large title fonts by default
+theme_ecl <- theme_bw() + 
+  theme_fivethirtyeight() + 
+  theme(rect = element_rect(fill = "white"),
+        axis.title=element_text())
+theme_set(theme_ecl)
+# For when the legends should not be on bottom/horizontal
+theme_ecl_rightlegend = theme_ecl + 
+  theme(legend.position="right", legend.direction="vertical")
+
+## How to add new runs to the pipeline:
+#
+#  1. Download the data from Adaptive using the Sample Export. This should be in 
+#     a .zip format containing a .tsv file for each sample.
+#
+#  2. Download the sample summary data from Adaptive using Sample Summary. This
+#     should be in a .tsv format with one row per sample.
+#  
+#  3. Append the sample summary data to the existing sample summary .tsv file,
+#     after verifying that the columns are the same:
+#     $ tail -n +2 sampleStats.some_timestamp.tsv >> sampleStats.all.tsv
+# 
+#  4. Place the unzipped .tsv files in the data/tsv folder.
+#
+#  5. Make sure the seq_files points to the data/tsv folder, and the 
+#     seq_stats_file points to the complete sample summary file.
+#
+#  6. Add the ng of DNA for each sample to the sampleDNA.xlsx file and export to
+#     a tab-separated file (sampleDNA.txt). The ng of DNA can be found in 
+#     Adaptive's quant reports or from our own in-house measurements before the
+#     samples are sent out.
+#
+```
+
+
+# Introduction
+
+Data locations
+```{r setup, echo=TRUE}
+base_fp <- "~/data/analyses/xscid/analysis_pipeline/"
+data_fp <- "~/data/analyses/xscid/data/"
+source(file.path(base_fp, "lib/general_functions.R"))
+source(file.path(base_fp, "lib/data_loading_functions.R"))
+source(file.path(base_fp, "lib/population_diversity.R"))
+
+source(file.path(data_fp, "mysql_info.R"))
+
+# This directory should point to the folder with all the GTSP*.tsv files
+seq_files <- file.path(data_fp, "tsv")
+# This file should have the same number of rows as the number of files in seq_files
+seq_stats_file <- file.path(data_fp, "sampleStats.all.tsv")
+# This should contain the ng of DNA used for each sample
+sample_dna_file <- file.path(data_fp, "sampleDNA.txt")
+```
+
+```{r load-data}
+## Reading in sequence data
+# Read sequence data in fresh? 
+..reload_seq_data.. <- FALSE
+saved_seq_data_fp <- file.path(data_fp, "SequenceData.RData")
+if (..reload_seq_data..) {
+  seqs  <- read_adaptive_tsv(list.files(seq_files, full.names = TRUE))
+  save(seqs, file = saved_seq_data_fp)
+} else {
+  message("Loading saved sequence data...")
+  load(file = saved_seq_data_fp)
+}
+```
+
+
+```{r assemble-metadata}
+## Assemble metadata
+# DB connection for sample metadata
+con <- dbConnect(MySQL(), host=my$host, user=my$user, password=my$pass, dbname=my$db)
+mdata <- read_sample_metadata(list.files(seq_files), con, my$table)
+stats <- read_sequence_stats_file(seq_stats_file)
+dna.amts <- read_sample_dna_file(sample_dna_file)
+metadata <- merge(merge(mdata, dna.amts, by=c("accn", "replicate")),
+                  stats, by=c("accn", "replicate")) 
+
+# Calculate the Unique/Total ratio and clean up factor ordering
+metadata %<>%
+  arrange(desc(Group), patient, timepoint, cell.type) %>%
+  mutate(
+    Unique.v.Total = Unique/Total,
+    patient_at_timept=reorder_levels_by_uniq(patient_at_timept),
+    patient_at_timept_ctype=reorder_levels_by_uniq(patient_at_timept_ctype))
+
+
+
+## Write metadata to CSV for any outside manipulation
+write.table(
+  metadata, 
+  file = file.path(data_fp, "metadata.tsv"),
+  sep = "\t",
+  row.names = FALSE)
+
+# Cleanup
+if (!dbDisconnect(con)) warning("Could not close db connection...") else rm(con)
+rm(stats, dna.amts)
+```
+
+```{r us-only-patients}
+..US_Patients_Only.. = TRUE
+if (..US_Patients_Only..) {
+  metadata %<>% 
+    filter(trial %in% c("Control") | (trial == "SCIDn2" & grepl("SCID", patient)))
+}
+```
+
+Patient sample manifest for this analysis:
+```{r sample-table}
+metadata %>%
+  group_by(accn) %>% mutate(replicates=n()) %>% ungroup() %>%
+  arrange(Group, patient, timepoint, cell.type) %>%
+  select(patient, timepoint, Group, cell.type, replicates) %>%
+  distinct() %>%
+  pander(split.tables=Inf)
+```
+
+## Summary statistics
+```{r sequence-stats, fig.show='hold', fig.height=10}
+a_ply(c(".Unique"), 1, function(i) {
+  m.totals <- metadata %>% 
+    filter(cell.type %in% c("Tcells", "PBMC")) %>%
+    select(c(patient:Group), contains(i)) %>%
+    mutate(nmonths = as.factor(nmonths)) %>%
+    melt(variable.name="Sequence.type") %>% 
+    mutate(nmonths = as.integer(as.character(nmonths))) %>%
+    arrange(desc(Group), patient, timepoint, cell.type) %>%  
+    mutate(Sequence.type = str_replace(Sequence.type, i, ""))
+  
+  # Remove the period from ".Unique"
+  i <- str_sub(i, 2)    
+  
+  p <- ggplot(data=m.totals, 
+         aes(x=patient_at_timept_ctype, y=value, group=Sequence.type, fill=Sequence.type)) + 
+    stat_summary(fun.y="mean", geom="bar", position="dodge") +
+    coord_flip() + 
+    ylab("Sequences") +
+    ggtitle(paste(c(i, "Sequences (mean)"), collapse=" ")) +
+    scale_fill_few(palette="medium") +
+    theme(axis.text.y = element_text(hjust=1, vjust=0.5),
+        axis.title.y = element_blank())
+  plot(p)
+})
+
+metadata$patient_at_timept_ctype <- factor(
+  metadata$patient_at_timept_ctype,
+  levels=levels(metadata$patient_at_timept_ctype)[])
+
+ggplot(data = metadata, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Group)) +
+  stat_summary(fun.y="mean", geom="bar")  +
+  coord_flip() +
+  ylab("Unique/total") + 
+  ggtitle("Unique/total sequences ratio") +
+  theme_ecl_rightlegend +
+  theme(axis.title.y = element_blank())
+```
+
+```{r grant-fig-e}
+metadata.2 <- metadata %>% filter(patient != "SCID00004") %>% droplevels()
+metadata.2$patient_at_timept_ctype <- factor(
+  metadata.2$patient_at_timept_ctype,
+  levels=levels(metadata.2$patient_at_timept_ctype)[c(6:8, 1:5, 18, 16:15, 17, 9:10, 13:11, 14)])
+ggplot(data = metadata.2, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Group)) +
+  stat_summary(fun.y="mean", geom="bar")  +
+  coord_flip() +
+  ylab("Unique/total") + 
+  ggtitle("Unique/total sequences ratio") +
+  theme_ecl_rightlegend +
+  theme(axis.title.y = element_blank())
+```
+
+
+## Between-replicate variance
+```{r replicate-variance}
+metadata %>% 
+  group_by(accn) %>% 
+  mutate(replicate_var=var(Unique)) %>% 
+  select(patient_at_timept_ctype, cell.type, patient, Group, replicate_var) %>% 
+  subset() %>% 
+  distinct() %>% 
+  filter(!(is.na(replicate_var))) %>% 
+  ggplot(aes(x=Group, y=replicate_var, group=cell.type)) + 
+    geom_point(position=position_beeswarm(width = 0.2), aes(color=cell.type), size=3) +
+    theme_ecl_rightlegend +
+    ylab("Variance") +
+    ggtitle("Variance of unique species within samples")
+```
+
+
+## DNA used vs number of sequences
+
+The amount of DNA used in the reaction appears to correlate with the number of unique species found, especially for low amounts of DNA:
+```{r dna-vs-richness, fig.height=7}
+ggplot(data=filter(metadata, group != "ctrl_adult", cell.type %in% c("PBMC", "Tcells")), 
+       aes(x=Adaptive_DNA_ng, y=Unique.v.Total, color=patient, shape=cell.type)) +
+  geom_point(size=4) +
+  theme_ecl_rightlegend +
+  theme(plot.background = element_rect(linetype=1, size=1)) +
+  xlab("ng DNA (measured by Adaptive)") +
+  ylab("Unique sequences (divided by total sequences)") +
+  ggtitle("Sample richness vs DNA mass")
+```
+
+Dividing the richness by the amount of DNA used provides some additional normalization:
+```{r dna-normalized, fig.height=7}
+# Replaces values that are <= 0 or NA with the average of the valid values,
+# except when there are no valid values (all NA, <= 0)
+repl_NA_with_avg <- function(v) {
+  if(any(is.na(v)) || all(v < 0)) 
+    return(v)
+  v[(v <= 0)] <- mean(v[v > 0])
+  return(v)
+}
+
+# Adds a DNA_ng column that does away with missing
+metadata %<>% 
+  group_by(accn) %>% 
+  mutate(DNA_ng = repl_NA_with_avg(Adaptive_DNA_ng)) %>%
+  ungroup() %>%
+  mutate(
+    Total.Norm = Total/DNA_ng,
+    Unique.Norm = Unique/DNA_ng,
+    UvT.Norm = Unique.v.Total/DNA_ng)
+
+ggplot(data=filter(metadata, group != "ctrl_adult", cell.type %in% c("PBMC", "Tcells")), 
+       aes(x=DNA_ng, y=UvT.Norm, color=patient, shape=cell.type)) +
+  geom_point(size=4) +
+  theme_ecl_rightlegend +
+  theme(plot.background = element_rect(linetype=1, size=1)) +
+  xlab("ng DNA (measured by Adaptive)") +
+  ylab("Unique / (Total * DNA_ng)") +
+  ggtitle("Species richness normalized by DNA ng")
+```
+
+# Clonality and entropy
+```{r clonality-entropy}
+a_ply(c("Clonality", "Entropy"), 1, function(i) {
+    m <- metadata %>% 
+      filter(cell.type == "Tcells") %>%
+      select(c(patient:nmonths), contains(i)) %>%
+      mutate(nmonths = as.factor(nmonths)) %>%
+      melt() %>% 
+      mutate(nmonths = as.integer(as.character(nmonths))) %>%
+      arrange(trial, patient, nmonths) %>%
+      mutate(Group = ifelse(group=="patient", trial, group))
+    p <- ggplot(data=m, aes(x=patient_at_timept, y=value, fill=Group)) +
+      geom_boxplot() +
+      scale_color_few(palette="medium") +
+      coord_flip() +
+      ggtitle(i)
+    plot(p)
+})
+
+```
+
+
+## Clonal frequencies
+```{r clonalfreq-setup}
+limit <- 101
+cf <- seqs %>%
+  filter(sequenceStatus == "In") %>%
+  select(c(accn, replicate, count, nucleotide)) %>%
+  left_join(mdata, by=c("accn", "replicate"), copy=TRUE) %>%
+  group_by(accn) %>%
+  mutate(freq = count/sum(count),
+         rank = min_rank(1/count))
+```
+
+The frequencies of the top `r limit` clones in each patient timepoint are shown below.
+
+```{r clonalfreq-plots, fig.height=8, fig.width=6}
+cf.plot <- filter(cf, cell.type %in% c("Tcells"), rank < limit) %>%
+  mutate(Group = ifelse(group=="patient", trial, group))
+ggplot(cf.plot, aes(x=patient_at_timept, y=freq, color=Group)) + 
+  geom_point(position=position_beeswarm(bandwidth=2), size=1.3) +
+  scale_color_brewer(type="div", palette="RdBu") +
+#   scale_color_continuous_tableau(palette="Blue") +
+#   theme_fivethirtyeight() +
+#   theme(rect = element_rect(fill = "white")) +
+  theme(axis.text.y = element_text(hjust=1, vjust=1)) +
+  coord_flip() #+
+#   guides(color=FALSE)
+```
+
+## Memory vs. Naive Compartments
+### Comparing CD4+/CD8+, memory vs naive
+```{r mvn, fig.height=3, fig.width=8}
+mvn <- metadata %>% mutate(CD48 = ifelse(grepl("CD4pos", cell.type), "CD4+", 
+                              ifelse(grepl("CD8pos", cell.type), "CD8+", "(unsorted)")),
+                RARO = ifelse(grepl("RApos", cell.type), "RA+ (naive)", 
+                              ifelse(grepl("ROpos", cell.type), "RO+ (memory)", "(unsorted)")))
+ggplot(data=filter(mvn, !(cell.type %in% c("Tcells", "PBMC"))), aes(x=CD48, y=Clonality, color=RARO)) + 
+  geom_boxplot() + facet_wrap(~patient_at_timept) + theme_bw() +
+  ggtitle("Clonality")
+ggplot(data=filter(mvn, !(cell.type %in% c("Tcells", "PBMC"))), aes(x=CD48, y=Unique/Total, color=RARO)) + 
+  geom_boxplot() + facet_wrap(~patient_at_timept) + theme_bw() +
+  ggtitle("Unique/Total Sequences")
+```
+
+### Comparing CD4+/CD8+ vs unsorted T cells
+Only two patients (P2/RN from SCIDn1 and SCID00001 from SCIDn2) have both sorted and unsorted T cell data.
+```{r raro-vs-tcell, fig.width=8, fig.height=4}
+# Isolating the patients for which we have both cell types (T cells and CD4/CD8 sorted)
+rvt <- mvn %>% filter(patient_at_timept %in% c("P2/RN @ 180m", "SCID00001 @ 12m"))
+ggplot(data=rvt, aes(x=CD48, y=Clonality, color=RARO)) + 
+  geom_boxplot() + 
+  facet_wrap(~patient_at_timept) +
+  theme_bw() + ggtitle("Clonality")
+ggplot(data=rvt, aes(x=CD48, y=Unique/Total, color=RARO)) + 
+  geom_boxplot() + 
+  facet_wrap(~patient_at_timept) +
+  theme_bw() + ggtitle("Unique/Total sequences")
+```
+
+## PBMCs vs T cells
+We have concordant PBMC and T cell samples from the same patient at the same timepoint. This shows the number of unique species normalized by sequencing effort for both samples.
+```{r pbmc-vs-tcell}
+pvt <- metadata %>% 
+  group_by(patient_at_timept) %>%
+  filter("Tcells" %in% cell.type & "PBMC" %in% cell.type)
+if (nrow(pvt) > 0) {
+  ggplot(data=pvt, aes(x=patient, y=Unique.v.Total)) + 
+  geom_boxplot(aes(group=patient_at_timept_ctype, fill=cell.type)) +
+  ylab("Unique/Total") +
+  ggtitle("Comparison of richness between PBMCs and T cells") +
+  theme_ecl_rightlegend + 
+  theme(axis.title.x = element_blank())
+}
+
+  
+```
+
+
+# Richness and diversity
+```{r collapse-by-aa}
+# Keep only valid TCR sequences (in-frame)
+seqs$sample = with(seqs, sprintf("%s_%i", accn, replicate))
+metadata$sample = with(metadata, sprintf("%s_%i", accn, replicate))
+aa = seqs %>% filter(sequenceStatus=="In", cloneResolved %in% c("VJ", "VDJ")) %>%
+  # Aggregate by amino acid and sample
+  group_by(aminoAcid, sample) %>%
+  # Sum counts and frequencies (and change freq back to [0-1] rather than [0-100])
+  summarize(count=sum(count), freq=sum(frequency)/100)
+
+# Re-add metadata
+aa = inner_join(aa, metadata, by="sample", copy=TRUE)
+```
+
+```{r chao2-std}
+#' Takes a vector of incidence counts and returns the Chao2 estimate of the 
+#' total number of unseen+seen species, as well as the variance.
+chao2_estimator <- function(count) {
+  s_obs <- length(count) 
+  q1 <- sum(count==1)
+  q2 <- sum(count==2)
+  if (q2 == 0) {
+    return(data.frame(species=NA, spec.var=NA, spec.sd=NA))
+  }
+  s2 <- s_obs + (q1^2)/(2*q2)
+  var_s <- q2*(((q1/q2)/4)^4 + (q1/q2)^3 + ((q1/q2)/2)^2)
+  sd <- sqrt(var_s)
+  return(data.frame(species=s2, spec.var=var_s, spec.sd=sd))
+}
+
+chao2_estimates <- ddply(aa, "accn", function(a) {
+  occurances <- a %>% group_by(aminoAcid) %>% summarize(count=n())
+  estimates <- chao2_estimator(occurances$count)
+})
+
+chao2_std_plot <- metadata %>%
+  merge(chao2_estimates, by="accn") %>%
+  mutate(spec.min=species-spec.sd, spec.max=species+spec.sd) %>%
+  select(patient_at_timept_ctype, accn, Group, cell.type, patient, species:spec.max) %>%
+  distinct()
+
+ggplot(chao2_std_plot, aes(x=patient_at_timept_ctype, fill=Group)) +
+  geom_bar(aes(y=species), stat="identity") +
+  geom_errorbar(aes(ymin=spec.min, ymax=spec.max)) + 
+  coord_flip()
+```
+
+```{r chao2_summary, fig.height=5, fig.width=5}
+chao2_std_plot %>% filter(!is.na(species), cell.type %in% c("Tcells", "PBMC")) %>%
+ggplot(aes(x=Group, y=species, ymin=spec.min, ymax=spec.max, group=patient)) +
+  geom_point(aes(color=Group), position=position_beeswarm(bandwidth=1),
+             size=3) +
+  ggtitle("Estimated T cell richness") +
+  ylab("Unique T cells") +
+  theme(axis.title.x=element_blank())
+
+```
+
+```{r chao2-jackknife, eval=FALSE}
+# Jackknife Chao2 estimator
+# I think something is wrong here- not sure it's appropriate to leave out one
+# of the replicates, but maybe instead leave out one of the observations
+chao2_jackknife <- ddply(aa, "accn", function(tmp_aa) {
+  reps = unique(tmp_aa$replicate)
+  n = length(reps)
+  # Calculate the estimate over all replicates in this accn
+  s_all <- tmp_aa %>% group_by(aminoAcid) %>% 
+    summarize(count=n()) %$%
+    chao2_estimator(count)
+  # Calculate jackknife estimate
+  s_jackknife <- adply(reps, 1, function(i) {
+    tmp <- tmp_aa %>% filter(replicate != i) %>% group_by(aminoAcid) %>%
+      summarize(count=n()) %>% summarize(species=chao2_estimator(count)$species)
+    return(tmp$species)
+  })
+  s_jackknife %$% 
+    data.frame(
+      spec.all=s_all$species,
+      spec.all.sd=ifelse(is.null(s_all$spec.sd), NA, s_all$spec.sd),
+      spec.jk=mean(V1), 
+      spec.jk.sd=sd(V1),
+      spec.bias.corrected=((n*s_all$species) - ((n-1)*mean(V1)))
+      )
+})
+
+metadata %>%
+  merge(chao2_jackknife, by="accn") %>%
+  mutate(spec.min=species-spec.sd, spec.max=species+spec.sd) %>%
+  select(patient_at_timept_ctype, accn, Group, species:spec.max) %>%
+  distinct() %>%
+  ggplot(aes(x=patient_at_timept_ctype, fill=Group)) +
+  geom_bar(aes(y=species), stat="identity") +
+  geom_errorbar(aes(ymin=spec.min, ymax=spec.max)) + 
+  scale_y_log10() +
+  coord_flip()
+```
+
+```{r jackknife-estimator, eval=FALSE}
+s_jack2 <- ddply(aa, "accn", function(a) {
+  counts <- a %>% group_by(aminoAcid) %>% summarize(count=n())
+  with(counts, {
+    s_obs <- length(count)
+    q1 = sum(count==1)
+    q2 = sum(count==2)
+    m = max(a$replicate) # number of replicate samples
+    data.frame(
+      # Smith & Van Belle, 1984
+      species=(s_obs + (q1*(2*m-3))/m - (q2*(m-2)^2)/(m*(m-1))))
+  })
+
+})
+jk_plot <- metadata %>%
+  merge(s_jack2, by="accn") %>%
+  select(patient_at_timept_ctype, accn, Group, DNA_ng, species) %>%
+  group_by(accn) %>%
+  mutate(DNA_ng=mean(DNA_ng)) %>%
+  distinct()
+
+ggplot(jk_plot, aes(x=patient_at_timept_ctype, fill=Group)) +
+  geom_bar(aes(y=species), stat="identity") +
+  coord_flip()
+```
+
+```{r diversity-plots-2}
+
+```
+
+```{r diversity}
+# Compute incidence counts and re-add to metadata
+incidence_counts = aa %>% group_by(aminoAcid, accn) %>% summarize(count=n())
+metadata = inner_join(
+  metadata,
+  chao2(incidence_counts, group.col="accn", count.col="count"),
+  by="accn")
+
+# Compute a variety of alpha diversity indices and add them to the sample summary
+a.diversity <- alpha_diversity(aa, group.col="sample", freq.col="freq")
+metadata = inner_join(metadata, a.diversity, by="sample")
+```
+
+```{r population-plots}
+c2.mdat = metadata %>% 
+  select(accn, chao2, group, patient, patient_at_timept_ctype, trial, Group, cell.type, nmonths) %>% 
+  filter(cell.type %in% c("Tcells", "PBMC")) %>% group_by(accn) %>% 
+  mutate(nsamples=n())
+
+ggplot(data=c2.mdat, aes(x=patient_at_timept_ctype, y=chao2, fill=Group)) +
+  geom_bar(stat="identity") +
+  ylab("# of species") +
+  theme_ecl_rightlegend + 
+  theme(axis.title.y = element_blank()) + 
+  ggtitle("Estimated number of species (Chao2)") +
+  coord_flip()
+```
+
+```{r grant-fig-a}
+c2.mdat.2 <- c2.mdat[order(as.character(c2.mdat$patient), as.numeric(c2.mdat$nmonths), decreasing=TRUE), ]
+c2.mdat.2 %<>% filter(patient != "SCID00004") %>% distinct(accn)
+c2.mdat.2 <- c2.mdat.2[c(9:11, 12:16, 1:8), ]
+c2.mdat.2$patient_at_timept_ctype <- reorder_levels_by_uniq(c2.mdat.2$patient_at_timept_ctype)
+
+ggplot(data=c2.mdat.2, aes(x=patient_at_timept_ctype, y=chao2, fill=Group)) +
+  geom_bar(stat="identity") +
+  ylab("# of species") +
+  theme_ecl_rightlegend + 
+  theme(axis.title.y = element_blank()) + 
+  ggtitle("Estimated number of species (Chao2)") +
+  coord_flip()
+```
+
+```{r diversity-plots}
+aa.accn <- aa %>% group_by(aminoAcid, accn) %>%
+  summarize(count=sum(count), sample.count=n()) %>%
+  group_by(accn) %>%
+  mutate(freq=count/sum(count))
+rfied <- rarefy(aa.accn, size=8e5, prob.col="freq", spec.col="aminoAcid", group.col="accn")
+rfied <- rfied %>% group_by(accn) %>% mutate(freq=count/sum(count))
+rfied.ad <- alpha_diversity(rfied, group.col="accn", freq.col="freq")
+```
+
+```{r richness-v-gini}
+c3.mdat <- aa %>% group_by(accn) %>%
+  summarize(count=sum(count), sample.count=n(), freq=count/sum(count), gini=Gini(freq)) %>%
+  distinct(accn) %>%
+  inner_join(c2.mdat, by="accn", copy=TRUE) %>%
+  distinct()
+
+ggplot(c3.mdat, aes(x=gini, y=chao2, color=patient)) + 
+  geom_point(size=4) +
+  xlab("Gini index") +
+  ylab("Estimated population size") +
+  ggtitle("Species evenness vs population size") +
+  facet_wrap(~ Group)
+```
+
+```{r, fig.height=6}
+# only using a section of metadata
+metadata %<>% mutate(Group = ifelse(group=="patient", trial, group))
+mdat <- unique(metadata %>% filter(cell.type %in% c("Tcells", "PBMC")) %>% select(accn, patient, timepoint, group, Group, patient_at_timept))
+rfied.mdat <- inner_join(mdat, rfied.ad, by="accn")
+m.rfied.mdat <- melt(rfied.mdat, measure.vars=c("inv.simpson", "gini.simpson", "shannon.weaver")) %>%
+  filter(variable == "inv.simpson")
+m.rfied.mdat$variable = revalue(m.rfied.mdat$variable, c(inv.simpson="Inverse Simpson", shannon.weaver="Shannon-Weaver"))
+
+ggplot(data=m.rfied.mdat, aes(x=Group, y=value)) +
+  geom_boxplot(aes(fill=Group)) +
+  ylab("Inverse Simpson diversity index") +
+  ggtitle("Diversity between groups")
+  
+```
+
+```{r grant-fig-g}
+ggplot(data=m.rfied.mdat %>% filter(patient != "SCID00004"), aes(x=Group, y=value)) +
+  geom_boxplot(aes(fill=Group)) +
+  ylab("Inverse Simpson diversity index") +
+  ggtitle("Diversity between groups")
+
+```
+
+```{r}
+# ggplot(data=m.rfied.mdat, aes(x=accn, y=value, fill=Group)) +
+#   geom_bar(stat="identity") + scale_fill_brewer(type="qual", palette="Set1") +
+#   scale_x_discrete(limits=mdat$accn[order(mdat$group, mdat$patient)], 
+#                    labels=mdat$patient_at_timept[order(mdat$group, mdat$patient)],
+#                    name="Patient") +
+#   facet_wrap(~variable, scales="free_y", ncol=1) +
+# #   stat_identity(geom="text", aes(x=accn, y=0, label=patient), hjust=0, angle=90) +
+#   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=14),
+#         axis.title.x = element_text(vjust=-0.4),
+#         axis.text.y = element_text(size=14),
+#         axis.title.y = element_text(vjust=1),
+#         plot.title = element_text(vjust=1)) +
+#   ggtitle("Diversity indices for subjects") +
+#   ylab("")
+```
+
