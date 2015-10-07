@@ -10,7 +10,9 @@ The main document is `report.Rmd`. Supporting code is located in `lib\`.
 
 3. Append the sample summary data to the existing sample summary .tsv file, after verifying that the columns are the same: 
 
-    ```bash $ tail -n +2 sampleStats.some_timestamp.tsv >> sampleStats.all.tsv```
+    ```bash 
+    $ tail -n +2 sampleStats.some_timestamp.tsv >> sampleStats.all.tsv
+    ```
 
 4. Place the unzipped .tsv files in the `data/tsv` folder.
 
