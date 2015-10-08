@@ -34,17 +34,12 @@ library(gridExtra)
 library(ggbeeswarm)
 library(magrittr)
 library(ineq)
+library(eclthemes)
 
-## Custom theme settings
-# No axis labels, large title fonts by default
-theme_ecl <- theme_bw() + 
-  theme_fivethirtyeight() + 
-  theme(rect = element_rect(fill = "white"),
-        axis.title=element_text())
-theme_set(theme_ecl)
-# For when the legends should not be on bottom/horizontal
-theme_ecl_rightlegend = theme_ecl + 
-  theme(legend.position="right", legend.direction="vertical")
+theme_set(theme_clarity())
+
+theme_clarity_bottomlegend <- theme_clarity() +
+  theme(legend.position="bottom", legend.direction="horizontal")
 ```
 
 
@@ -175,22 +170,25 @@ ggplot(data = metadata, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Gr
   coord_flip() +
   ylab("Unique/total") + 
   ggtitle("Unique/total sequences ratio") +
-  theme_ecl_rightlegend +
+  theme_clarity_bottomlegend +
   theme(axis.title.y = element_blank())
 ```
 
 ```{r grant-fig-e}
-metadata.2 <- metadata %>% filter(patient != "SCID00004") %>% droplevels()
-metadata.2$patient_at_timept_ctype <- factor(
-  metadata.2$patient_at_timept_ctype,
-  levels=levels(metadata.2$patient_at_timept_ctype)[c(6:8, 1:5, 18, 16:15, 17, 9:10, 13:11, 14)])
-ggplot(data = metadata.2, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Group)) +
-  stat_summary(fun.y="mean", geom="bar")  +
-  coord_flip() +
-  ylab("Unique/total") + 
-  ggtitle("Unique/total sequences ratio") +
-  theme_ecl_rightlegend +
-  theme(axis.title.y = element_blank())
+if (..US_Patients_Only..) {
+  metadata.2 <- metadata %>% filter(patient != "SCID00004") %>% droplevels()
+  metadata.2$patient_at_timept_ctype <- factor(
+    metadata.2$patient_at_timept_ctype,
+    levels=levels(metadata.2$patient_at_timept_ctype)[c(6:8, 1:5, 18, 16:15, 17, 9:10, 13:11, 14)])
+  ggplot(data = metadata.2, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Group)) +
+    stat_summary(fun.y="mean", geom="bar")  +
+    coord_flip() +
+    ylab("Unique/total") + 
+    ggtitle("Unique/total sequences ratio") +
+    theme_clarity() +
+    theme(axis.title.y = element_blank())
+}
+
 ```
 
 
@@ -205,7 +203,6 @@ metadata %>%
   filter(!(is.na(replicate_var))) %>% 
   ggplot(aes(x=Group, y=replicate_var, group=cell.type)) + 
     geom_point(position=position_beeswarm(width = 0.2), aes(color=cell.type), size=3) +
-    theme_ecl_rightlegend +
     ylab("Variance") +
     ggtitle("Variance of unique species within samples")
 ```
@@ -218,7 +215,7 @@ The amount of DNA used in the reaction appears to correlate with the number of u
 ggplot(data=filter(metadata, group != "ctrl_adult", cell.type %in% c("PBMC", "Tcells")), 
        aes(x=Adaptive_DNA_ng, y=Unique.v.Total, color=patient, shape=cell.type)) +
   geom_point(size=4) +
-  theme_ecl_rightlegend +
+  theme_clarity() +
   theme(plot.background = element_rect(linetype=1, size=1)) +
   xlab("ng DNA (measured by Adaptive)") +
   ylab("Unique sequences (divided by total sequences)") +
@@ -249,7 +246,7 @@ metadata %<>%
 ggplot(data=filter(metadata, group != "ctrl_adult", cell.type %in% c("PBMC", "Tcells")), 
        aes(x=DNA_ng, y=UvT.Norm, color=patient, shape=cell.type)) +
   geom_point(size=4) +
-  theme_ecl_rightlegend +
+  theme_clarity() +
   theme(plot.background = element_rect(linetype=1, size=1)) +
   xlab("ng DNA (measured by Adaptive)") +
   ylab("Unique / (Total * DNA_ng)") +
@@ -294,16 +291,23 @@ The frequencies of the top `r limit` clones in each patient timepoint are shown 
 
 ```{r clonalfreq-plots, fig.height=8, fig.width=6}
 cf.plot <- filter(cf, cell.type %in% c("Tcells"), rank < limit) %>%
-  mutate(Group = ifelse(group=="patient", trial, group))
+  mutate(Group = as.factor(ifelse(group=="patient", trial, group)))
+
+levels(cf.plot$Group) <- c("Healthy adults", "Healthy infants", "SCID (First Trial)", "SCID (Second Trial)")
+
 ggplot(cf.plot, aes(x=patient_at_timept, y=freq, color=Group)) + 
-  geom_point(position=position_beeswarm(bandwidth=2), size=1.3) +
-  scale_color_brewer(type="div", palette="RdBu") +
-#   scale_color_continuous_tableau(palette="Blue") +
-#   theme_fivethirtyeight() +
-#   theme(rect = element_rect(fill = "white")) +
-  theme(axis.text.y = element_text(hjust=1, vjust=1)) +
-  coord_flip() #+
-#   guides(color=FALSE)
+  geom_point(position=position_beeswarm(bandwidth=2), size=2) +
+  scale_color_brewer(type="div", palette="RdBu", guide=FALSE) +
+  theme(
+    axis.line = element_line(size=0.8),
+    axis.ticks = element_line(size=0.7),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(hjust=0.5)
+  ) +
+  facet_wrap(~ Group, ncol=4, scales="free_x") +
+  labs(x = "Subjects", y = "Frequency")
 ```
 
 ## Memory vs. Naive Compartments
@@ -347,7 +351,7 @@ if (nrow(pvt) > 0) {
   geom_boxplot(aes(group=patient_at_timept_ctype, fill=cell.type)) +
   ylab("Unique/Total") +
   ggtitle("Comparison of richness between PBMCs and T cells") +
-  theme_ecl_rightlegend + 
+  theme_clarity() + 
   theme(axis.title.x = element_blank())
 }
 
@@ -394,13 +398,34 @@ chao2_estimates <- ddply(aa, "accn", function(a) {
 chao2_std_plot <- metadata %>%
   merge(chao2_estimates, by="accn") %>%
   mutate(spec.min=species-spec.sd, spec.max=species+spec.sd) %>%
-  select(patient_at_timept_ctype, accn, Group, cell.type, patient, species:spec.max) %>%
+  select(patient_at_timept_ctype, patient_at_timept, accn, Group, cell.type, patient, species:spec.max) %>%
   distinct()
+```
 
-ggplot(chao2_std_plot, aes(x=patient_at_timept_ctype, fill=Group)) +
-  geom_bar(aes(y=species), stat="identity") +
-  geom_errorbar(aes(ymin=spec.min, ymax=spec.max)) + 
-  coord_flip()
+```{r chao2-std-plot}
+chao2_std_plot$Group <- factor(chao2_std_plot$Group)
+levels(chao2_std_plot$Group) <- c("Healthy adults", "Healthy infants", "SCID (First Trial)", "SCID (Second Trial)")
+
+chao2_std_plot %>%
+  filter(
+    cell.type %in% c("Tcells"), 
+    !(patient_at_timept %in% c("SCID00001 @ 12m", "SCID00001 @ 18m", "SCID00001 @ 24m")),
+    !(patient_at_timept %in% c("P2/RN @ 32m", "P10/KA @ 31m"))) %>%
+  
+  ggplot(aes(x=patient, fill=Group, group=patient_at_timept)) +
+  geom_bar(aes(y=species), stat="identity", color="black", position=position_dodge()) +
+  facet_wrap(~ Group, scales="free_x", ncol=4) +
+  scale_fill_brewer(type="div", palette="RdBu", guide=FALSE) +
+  theme(
+    axis.line = element_line(size=0.8),
+    axis.ticks = element_line(size=0.7),
+    axis.ticks.x = element_blank(),
+    axis.text.x = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(hjust=0.5)
+  ) + 
+  scale_y_continuous()
+  labs(x="Subject", y="T cell richness")
 ```
 
 ```{r chao2_summary, fig.height=5, fig.width=5}
@@ -505,7 +530,7 @@ c2.mdat = metadata %>%
 ggplot(data=c2.mdat, aes(x=patient_at_timept_ctype, y=chao2, fill=Group)) +
   geom_bar(stat="identity") +
   ylab("# of species") +
-  theme_ecl_rightlegend + 
+  theme_clarity() + 
   theme(axis.title.y = element_blank()) + 
   ggtitle("Estimated number of species (Chao2)") +
   coord_flip()
@@ -520,7 +545,7 @@ c2.mdat.2$patient_at_timept_ctype <- reorder_levels_by_uniq(c2.mdat.2$patient_at
 ggplot(data=c2.mdat.2, aes(x=patient_at_timept_ctype, y=chao2, fill=Group)) +
   geom_bar(stat="identity") +
   ylab("# of species") +
-  theme_ecl_rightlegend + 
+  theme_clarity() + 
   theme(axis.title.y = element_blank()) + 
   ggtitle("Estimated number of species (Chao2)") +
   coord_flip()

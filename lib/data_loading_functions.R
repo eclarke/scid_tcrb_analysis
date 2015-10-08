@@ -106,8 +106,8 @@ read_sample_dna_file <- function(dna.file) {
 .split_fname <- function(fname) {
   # pretend it's a filename if it's missing an extension
   if (!stringr::str_detect(fname, "\\.tsv$")) fname <- paste(c(fname, ".tsv"), collapse="")
-  accn = stringr::str_extract(fname, stringr::perl("[A-Z]*\\d*(?=[a-z]?.tsv)"))
-  repl = stringr::str_extract(fname, stringr::perl("(?<=\\d)[a-z](?=\\.tsv)"))
+  accn = stringr::str_extract(fname, stringr::regexp("[A-Z]*\\d*(?=[a-z]?.tsv)"))
+  repl = stringr::str_extract(fname, stringr::regexp("(?<=\\d)[a-z](?=\\.tsv)"))
   # if we can't find a replicate letter, assume it's the first replicate
   if (is.na(repl)) repl <- 1 else repl <- which(repl == letters)
   return(list(accn=accn, replicate=repl))
