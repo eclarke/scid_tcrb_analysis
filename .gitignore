@@ -4,4 +4,5 @@
 packrat/lib*/
 README.html
 packrat/src/
-report.html
+main_report_*
+extra_figures
