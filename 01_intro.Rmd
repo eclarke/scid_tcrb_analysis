@@ -1,0 +1,49 @@
+Patient sample manifest for this analysis:
+```{r sample-table}
+metadata %>%
+  group_by(accn) %>% mutate(replicates=n()) %>% ungroup() %>%
+  arrange(Group, patient, timepoint, cell.type) %>%
+  select(patient, timepoint, Group, cell.type, replicates) %>%
+  distinct() %>%
+  pander(split.tables=Inf)
+```
+
+## Summary statistics
+```{r sequence-stats, fig.show='hold', fig.height=10}
+a_ply(c(".Unique"), 1, function(i) {
+  m.totals <- metadata %>% 
+    filter(cell.type %in% c("Tcells", "PBMC")) %>%
+    select(c(patient:Group), contains(i)) %>%
+    mutate(nmonths = as.factor(nmonths)) %>%
+    melt(variable.name="Sequence.type") %>% 
+    mutate(nmonths = as.integer(as.character(nmonths))) %>%
+    arrange(desc(Group), patient, timepoint, cell.type) %>%  
+    mutate(Sequence.type = str_replace(Sequence.type, i, ""))
+  
+  # Remove the period from ".Unique"
+  i <- str_sub(i, 2)    
+  
+  p <- ggplot(data=m.totals, 
+         aes(x=patient_at_timept_ctype, y=value, group=Sequence.type, fill=Sequence.type)) + 
+    stat_summary(fun.y="mean", geom="bar", position="dodge") +
+    coord_flip() + 
+    ylab("Sequences") +
+    ggtitle(paste(c(i, "Sequences (mean)"), collapse=" ")) +
+    scale_fill_few(palette="medium") +
+    theme(axis.text.y = element_text(hjust=1, vjust=0.5),
+        axis.title.y = element_blank())
+  plot(p)
+})
+
+metadata$patient_at_timept_ctype <- factor(
+  metadata$patient_at_timept_ctype,
+  levels=levels(metadata$patient_at_timept_ctype)[])
+
+ggplot(data = metadata, aes(x=patient_at_timept_ctype, y=Unique.v.Total, fill=Group)) +
+  stat_summary(fun.y="mean", geom="bar")  +
+  coord_flip() +
+  ylab("Unique/total") + 
+  ggtitle("Unique/total sequences ratio") +
+  theme_clarity_bottomlegend +
+  theme(axis.title.y = element_blank())
+```

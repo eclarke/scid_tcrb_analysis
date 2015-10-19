@@ -17,6 +17,11 @@ Source: CRAN
 Version: 0.3.1
 Hash: 096699d1ac1cf530acfc646a0c90ee5d
 
+Package: MASS
+Source: CRAN
+Version: 7.3-44
+Hash: 3a901d1f70036f5b1e11bcdf8fdb66d9
+
 Package: R6
 Source: CRAN
 Version: 2.1.1
@@ -27,10 +32,16 @@ Source: CRAN
 Version: 1.1-2
 Hash: c0d56cd15034f395874c870141870c25
 
+Package: RCurl
+Source: CRAN
+Version: 1.95-4.7
+Hash: 7756ed9df5d79ca87bc9e93f85d89b87
+Requires: bitops
+
 Package: RMySQL
 Source: CRAN
-Version: 0.10.6
-Hash: 48f895bfad271e30dd09086ccad57aa3
+Version: 0.10.4
+Hash: 7f7c5d1e4823932251804edc79096007
 Requires: DBI
 
 Package: Rcpp
@@ -69,6 +80,11 @@ Source: CRAN
 Version: 1.2-6
 Hash: 00bb12245cd975c450cc4a960884fa15
 
+Package: corpcor
+Source: CRAN
+Version: 1.6.8
+Hash: 2349dc947f4af3aebcd0aaeca4c0a258
+
 Package: curl
 Source: CRAN
 Version: 0.9.3
@@ -103,11 +119,26 @@ Version: 0.4.3
 Hash: 51606df7715ff20e835c66a9af9c4371
 Requires: BH, DBI, R6, Rcpp, assertthat, lazyeval, magrittr
 
+Package: eclthemes
+Source: github
+Version: 0.1
+Hash: a80d80e131abb36d0345e5bba75e131f
+Requires: ggplot2, ggthemes
+GithubRepo: eclthemes
+GithubUsername: eclarke
+GithubRef: master
+GithubSha1: ac3d61f5f81328ce6126e5e3ba5e9f7e454699ff
+
 Package: evaluate
 Source: CRAN
 Version: 0.8
 Hash: aac00bd789bac10970b50e3b7e0cab04
 Requires: stringr
+
+Package: expm
+Source: CRAN
+Version: 0.999-0
+Hash: 5041cb96d34112f65f0d13385eded9ee
 
 Package: formatR
 Source: CRAN
@@ -128,13 +159,13 @@ Package: ggplot2
 Source: CRAN
 Version: 1.0.1
 Hash: 4aff1b269135bd2cdea378f4f2f2895e
-Requires: digest, gtable, proto, plyr, scales, reshape2
+Requires: MASS, digest, gtable, plyr, proto, reshape2, scales
 
 Package: ggthemes
 Source: CRAN
 Version: 2.2.1
 Hash: ebee65a277ce2a3f1e3ed1f343c02d8b
-Requires: colorspace, proto, scales, ggplot2
+Requires: colorspace, ggplot2, proto, scales
 
 Package: git2r
 Source: CRAN
@@ -172,6 +203,7 @@ Requires: R6, curl, digest, jsonlite, mime, stringr
 Package: ineq
 Source: CRAN
 Version: 0.2-13
+Hash: f6fb24cdf453b705896a8accbcc3c644
 
 Package: jsonlite
 Source: CRAN
@@ -193,6 +225,12 @@ Package: lazyeval
 Source: CRAN
 Version: 0.1.10
 Hash: 9679f1ac7f6bc07bc79755f34cd15e1f
+
+Package: lymphclon
+Source: CRAN
+Version: 1.3.0
+Hash: f169e0bb77d3eb6491b4e5c87176151d
+Requires: MASS, corpcor, expm
 
 Package: magrittr
 Source: CRAN
@@ -232,6 +270,11 @@ Source: CRAN
 Version: 0.5.2
 Hash: 9d10f8393ea0b6337c4fdce94375e8cd
 Requires: Rcpp, digest
+
+Package: permute
+Source: CRAN
+Version: 0.8-4
+Hash: b11e9a75cb57346759663833f1423551
 
 Package: plyr
 Source: CRAN
@@ -277,7 +320,7 @@ Package: scales
 Source: CRAN
 Version: 0.3.0
 Hash: d1a44123ba586ee1c4b21eadf7186991
-Requires: RColorBrewer, Rcpp, dichromat, labeling, plyr, munsell
+Requires: RColorBrewer, Rcpp, dichromat, labeling, munsell, plyr
 
 Package: stringi
 Source: CRAN
@@ -290,6 +333,12 @@ Version: 1.0.0
 Hash: 2676dd5f88890910962b733b0f9540e1
 Requires: magrittr, stringi
 
+Package: vegan
+Source: CRAN
+Version: 2.3-1
+Hash: b92e7d8ff3e3fb1c03e966e76ae487e1
+Requires: MASS, permute
+
 Package: whisker
 Source: CRAN
 Version: 0.3-2
@@ -298,7 +347,7 @@ Hash: 803d662762e532705c2c066a82d066e7
 Package: xml2
 Source: CRAN
 Version: 0.1.2
-Hash: 8c246b854efdfc4e86633937c4320b97
+Hash: f6de7afd3d80c2dc9795d7e6aa3de8c2
 Requires: BH, Rcpp
 
 Package: xtable

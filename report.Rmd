@@ -48,7 +48,7 @@ theme_clarity_bottomlegend <- theme_clarity() +
 Data locations
 ```{r setup, echo=TRUE}
 base_fp <- "."
-data_fp <- "~/data/analyses/xscid/data/"
+data_fp <- file.path(base_fp, "data")
 source(file.path(base_fp, "lib/general_functions.R"))
 source(file.path(base_fp, "lib/data_loading_functions.R"))
 source(file.path(base_fp, "lib/population_diversity.R"))
@@ -72,7 +72,7 @@ sample_dna_file <- file.path(data_fp, "sampleDNA.txt")
 ```{r load-data}
 ## Reading in sequence data
 # Read sequence data in fresh? 
-..reload_seq_data.. <- FALSE
+..reload_seq_data.. <- TRUE
 saved_seq_data_fp <- file.path(data_fp, "SequenceData.RData")
 if (..reload_seq_data..) {
   seqs  <- read_adaptive_tsv(list.files(seq_files, full.names = TRUE))
@@ -600,20 +600,4 @@ ggplot(data=m.rfied.mdat %>% filter(patient != "SCID00004"), aes(x=Group, y=valu
 
 ```
 
-```{r}
-# ggplot(data=m.rfied.mdat, aes(x=accn, y=value, fill=Group)) +
-#   geom_bar(stat="identity") + scale_fill_brewer(type="qual", palette="Set1") +
-#   scale_x_discrete(limits=mdat$accn[order(mdat$group, mdat$patient)], 
-#                    labels=mdat$patient_at_timept[order(mdat$group, mdat$patient)],
-#                    name="Patient") +
-#   facet_wrap(~variable, scales="free_y", ncol=1) +
-# #   stat_identity(geom="text", aes(x=accn, y=0, label=patient), hjust=0, angle=90) +
-#   theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, size=14),
-#         axis.title.x = element_text(vjust=-0.4),
-#         axis.text.y = element_text(size=14),
-#         axis.title.y = element_text(vjust=1),
-#         plot.title = element_text(vjust=1)) +
-#   ggtitle("Diversity indices for subjects") +
-#   ylab("")
-```
 
